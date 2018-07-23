@@ -7,6 +7,6 @@ kibana:
     type: NodePort
     labels:
       kubernetes.io/cluster-service: "true"
-      kubernetes.io/name: "Kibana"
+      kubernetes.io/name: Kibana
   env:
     ELASTICSEARCH_URL: http://elasticsearch-logging:9200

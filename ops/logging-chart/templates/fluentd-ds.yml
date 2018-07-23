@@ -1,21 +1,19 @@
----
-# https://raw.githubusercontent.com/kubernetes/kubernetes/v1.10.2/cluster/addons/fluentd-elasticsearch/fluentd-es-ds.yaml
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
-  name: "fluentd-es-v2.2.0"
+  name: fluent-bit
   labels:
-    app: fluentd-es
+    app: fluent-bit-logging
     kubernetes.io/cluster-service: "true"
     addonmanager.kubernetes.io/mode: Reconcile
 spec:
   selector:
     matchLabels:
-      app: fluentd-es
+      app: fluent-bit-logging
   template:
     metadata:
       labels:
-        app: fluentd-es
+        app: fluent-bit-logging
         kubernetes.io/cluster-service: "true"
       # This annotation ensures that fluentd does not get evicted if the node
       # supports critical pod annotation based priority scheme.
@@ -26,11 +24,16 @@ spec:
       priorityClassName: system-node-critical
       serviceAccountName: efk
       containers:
-      - name: fluentd-es
-        image: "k8s.gcr.io/fluentd-elasticsearch:v2.2.0"
+      - name: fluent-bit
+        image: fluent/fluent-bit:0.13.4
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 2020
         env:
-        - name: FLUENTD_ARGS
-          value: "--no-supervisor -q"
+        - name: FLUENT_ELASTICSEARCH_HOST
+          value: "elasticsearch-logging"
+        - name: FLUENT_ELASTICSEARCH_PORT
+          value: "9200"
         resources:
           limits:
             memory: 500Mi
@@ -41,11 +44,11 @@ spec:
         - name: varlog
           mountPath: /var/log
         - name: varlibdockercontainers
-          mountPath: "/var/lib/docker/containers"
+          mountPath: /var/lib/docker/containers
           readOnly: true
-        - name: config-volume
-          mountPath: "/etc/fluent/config.d"
-      terminationGracePeriodSeconds: 30
+        - name: fluent-bit-config
+          mountPath: /fluent-bit/etc/
+      terminationGracePeriodSeconds: 10
       volumes:
       - name: varlog
         hostPath:
@@ -53,6 +56,10 @@ spec:
       - name: varlibdockercontainers
         hostPath:
           path: /var/lib/docker/containers
-      - name: config-volume
+      - name: fluent-bit-config
         configMap:
-          name: fluentd-config
+          name: fluent-bit-config
+      tolerations:
+      - key: node-role.kubernetes.io/master
+        operator: Exists
+        effect: NoSchedule
