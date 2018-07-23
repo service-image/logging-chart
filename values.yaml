@@ -5,7 +5,8 @@
 kibana:
   service:
     type: NodePort
-  # env:
-    # ELASTICSEARCH_URL: http://elk-fluentd-elasticsearch:9200
-
-fluentd-elasticsearch:
+    labels:
+      kubernetes.io/cluster-service: "true"
+      kubernetes.io/name: "Kibana"
+  env:
+    ELASTICSEARCH_URL: http://elasticsearch-logging:9200

@@ -4,7 +4,7 @@ kind: Service
 metadata:
   name: elasticsearch-logging
   labels:
-    k8s-app: elasticsearch-logging
+    app: elasticsearch-logging
     kubernetes.io/cluster-service: "true"
     kubernetes.io/name: "Elasticsearch"
 spec:
@@ -13,4 +13,4 @@ spec:
     protocol: TCP
     targetPort: db
   selector:
-    k8s-app: elasticsearch-logging
+    app: elasticsearch-logging
