@@ -3,28 +3,120 @@
 # Declare variables to be passed into your templates.
 
 kibana:
-  service:
-    type: NodePort
-  env:
-    ELASTICSEARCH_URL: http://elk-fluentd-elasticsearch:9200
+  image:
+    repository: "docker.elastic.co/kibana/kibana-oss"
+    tag: "6.3.1"
+    pullPolicy: "IfNotPresent"
 
-fluentd-elasticsearch:
+  commandline:
+    args:
+
+  env:
+    # All Kibana configuration options are adjustable via env vars.
+    # To adjust a config option to an env var uppercase + replace `.` with `_`
+    # Ref: https://www.elastic.co/guide/en/kibana/current/settings.html
+    #
+    # ELASTICSEARCH_URL: http://elasticsearch-client:9200
+    # SERVER_PORT: 5601
+    # LOGGING_VERBOSE: "true"
+    # SERVER_DEFAULTROUTE: "/app/kibana"
+
   service:
     type: NodePort
-    ports:
-    - containerPort: 9200
-      name: db
-      protocol: TCP
-    - containerPort: 9300
-      name: transport
-      protocol: TCP
+    externalPort: 443
+    internalPort: 5601
+    ## External IP addresses of service
+    ## Default: nil
+    ##
+    # externalIPs:
+    # - 192.168.0.1
+    #
+    ## LoadBalancer IP if service.type is LoadBalancer
+    ## Default: nil
+    ##
+    # loadBalancerIP: 10.2.2.2
+    annotations:
+      # Annotation example: setup ssl with aws cert when service.type is LoadBalancer
+      # service.beta.kubernetes.io/aws-load-balancer-ssl-cert: arn:aws:acm:us-east-1:EXAMPLE_CERT
+    labels:
+      ## Label example: show service URL in `kubectl cluster-info`
+      # kubernetes.io/cluster-service: "true"
+
+  resources: {}
+    # limits:
+    #   cpu: 100m
+    #   memory: 300Mi
+    # requests:
+    #   cpu: 100m
+    #   memory: 300Mi
+
+  priorityClassName: ""
+
+  # Affinity for pod assignment
+  # Ref: https://kubernetes.io/docs/concepts/configuration/assign-pod-node/#affinity-and-anti-affinity
+  # affinity: {}
+
+  # Tolerations for pod assignment
+  # Ref: https://kubernetes.io/docs/concepts/configuration/taint-and-toleration/
+  tolerations: []
+
+  # Node labels for pod assignment
+  # Ref: https://kubernetes.io/docs/user-guide/node-selection/
+  nodeSelector: {}
+
+  podAnnotations: {}
+  replicaCount: 1
+
+
+fluentd:
+  image:
+    repository: gcr.io/google-containers/fluentd-elasticsearch
+  ## Specify an imagePullPolicy (Required)
+  ## It's recommended to change this to 'Always' if the image tag is 'latest'
+  ## ref: http://kubernetes.io/docs/user-guide/images/#updating-images
+    tag: v2.0.4
+    pullPolicy: IfNotPresent
+
+  ## Configure resource requests and limits
+  ## ref: http://kubernetes.io/docs/user-guide/compute-resources/
+  ##
+  resources:
+    limits:
+      cpu: 100m
+      memory: 500Mi
+    requests:
+      cpu: 100m
+      memory: 200Mi
+
+  elasticsearch:
+    host: 'elasticsearch-client'
+    port: 9200
+    buffer_chunk_limit: 2M
+    buffer_queue_limit: 8
+
+  livenessProbe:
+    enabled: true
+
+  annotations: {}
+    # prometheus.io/scrape: "true"
+    # prometheus.io/port: "24231"
+
+  tolerations: {}
+    # - key: node-role.kubernetes.io/master
+    #   operator: Exists
+    #   effect: NoSchedule
+
+  service: {}
+    # type: ClusterIP
+    # ports:
+    #   - name: "monitor-agent"
+    #     port: 24231
 
   configMaps:
     system.conf: |-
       <system>
         root_dir /tmp/fluentd-buffers/
       </system>
-
     containers.input.conf: |-
       # This configuration file for Fluentd / td-agent is used
       # to watch changes to Docker log files. The kubelet creates symlinks that
@@ -119,7 +211,6 @@ fluentd-elasticsearch:
       # This makes it easier for users to search for logs by pod name or by
       # the name of the Kubernetes container regardless of how many times the
       # Kubernetes pod has been restarted (resulting in a several Docker container IDs).
-
       # Json Log Example:
       # {"log":"[info:2016-02-16T16:04:05.930-08:00] Some log text here\n","stream":"stdout","time":"2016-02-17T00:04:05.931087621Z"}
       # CRI Log Example:
@@ -128,24 +219,12 @@ fluentd-elasticsearch:
         @id fluentd-containers.log
         @type tail
         path /var/log/containers/*.log
-        pos_file /var/log/containers.log.pos
+        pos_file /var/log/fluentd-containers.log.pos
         time_format %Y-%m-%dT%H:%M:%S.%NZ
         tag raw.kubernetes.*
+        format json
         read_from_head true
-        <parse>
-          @type multi_format
-          <pattern>
-            format json
-            time_key time
-            time_format %Y-%m-%dT%H:%M:%S.%NZ
-          </pattern>
-          <pattern>
-            format /^(?<time>.+) (?<stream>stdout|stderr) [^ ]* (?<log>.*)$/
-            time_format %Y-%m-%dT%H:%M:%S.%N%:z
-          </pattern>
-        </parse>
       </source>
-
       # Detect exceptions in the log output and forward them as one log entry.
       <match raw.kubernetes.**>
         @id raw.kubernetes
@@ -157,7 +236,6 @@ fluentd-elasticsearch:
         max_bytes 500000
         max_lines 1000
       </match>
-
     system.input.conf: |-
       # Example:
       # 2015-12-21 23:17:22,066 [salt.state       ][INFO    ] Completed state [net.ipv4.ip_forward] at time 23:17:22.066081
@@ -170,7 +248,6 @@ fluentd-elasticsearch:
         pos_file /var/log/salt.pos
         tag salt
       </source>
-
       # Example:
       # Dec 21 23:17:22 gke-foo-1-1-4b5cbd14-node-4eoj startupscript: Finished running startup script /var/run/google.startup.script
       <source>
@@ -181,11 +258,9 @@ fluentd-elasticsearch:
         pos_file /var/log/startupscript.log.pos
         tag startupscript
       </source>
-
       # Examples:
       # time="2016-02-04T06:51:03.053580605Z" level=info msg="GET /containers/json"
       # time="2016-02-04T07:53:57.505612354Z" level=error msg="HTTP Error" err="No such image: -f" statusCode=404
-      # TODO(random-liu): Remove this after cri container runtime rolls out.
       <source>
         @id docker.log
         @type tail
@@ -194,7 +269,6 @@ fluentd-elasticsearch:
         pos_file /var/log/docker.log.pos
         tag docker
       </source>
-
       # Example:
       # 2016/02/04 06:52:38 filePurge: successfully removed file /var/etcd/data/member/wal/00000000000006d0-00000000010a23d1.wal
       <source>
@@ -207,11 +281,9 @@ fluentd-elasticsearch:
         pos_file /var/log/etcd.log.pos
         tag etcd
       </source>
-
       # Multi-line parsing is required for all the kube logs because very large log
       # statements, such as those that include entire object bodies, get split into
       # multiple lines by glog.
-
       # Example:
       # I0204 07:32:30.020537    3368 server.go:1048] POST /stats/container/: (13.972191ms) 200 [[Go-http-client/1.1] 10.244.1.3:40537]
       <source>
@@ -226,7 +298,6 @@ fluentd-elasticsearch:
         pos_file /var/log/kubelet.log.pos
         tag kubelet
       </source>
-
       # Example:
       # I1118 21:26:53.975789       6 proxier.go:1096] Port "nodePort for kube-system/default-http-backend:http" (:31429/tcp) was open before and is still needed
       <source>
@@ -241,7 +312,6 @@ fluentd-elasticsearch:
         pos_file /var/log/kube-proxy.log.pos
         tag kube-proxy
       </source>
-
       # Example:
       # I0204 07:00:19.604280       5 handlers.go:131] GET /api/v1/nodes: (1.624207ms) 200 [[kube-controller-manager/v1.1.3 (linux/amd64) kubernetes/6a81b50] 127.0.0.1:38266]
       <source>
@@ -256,7 +326,6 @@ fluentd-elasticsearch:
         pos_file /var/log/kube-apiserver.log.pos
         tag kube-apiserver
       </source>
-
       # Example:
       # I0204 06:55:31.872680       5 servicecontroller.go:277] LB already exists and doesn't need update for service kube-system/kube-ui
       <source>
@@ -271,7 +340,6 @@ fluentd-elasticsearch:
         pos_file /var/log/kube-controller-manager.log.pos
         tag kube-controller-manager
       </source>
-
       # Example:
       # W0204 06:49:18.239674       7 reflector.go:245] pkg/scheduler/factory/factory.go:193: watch of *api.Service ended with: 401: The event in requested index is outdated and cleared (the requested history has been cleared [2578313/2577886]) [2579312]
       <source>
@@ -286,7 +354,6 @@ fluentd-elasticsearch:
         pos_file /var/log/kube-scheduler.log.pos
         tag kube-scheduler
       </source>
-
       # Example:
       # I1104 10:36:20.242766       5 rescheduler.go:73] Running Rescheduler
       <source>
@@ -301,7 +368,6 @@ fluentd-elasticsearch:
         pos_file /var/log/rescheduler.log.pos
         tag rescheduler
       </source>
-
       # Example:
       # I0603 15:31:05.793605       6 cluster_manager.go:230] Reading config from path /etc/gce.conf
       <source>
@@ -316,7 +382,6 @@ fluentd-elasticsearch:
         pos_file /var/log/glbc.log.pos
         tag glbc
       </source>
-
       # Example:
       # I0603 15:31:05.793605       6 cluster_manager.go:230] Reading config from path /etc/gce.conf
       <source>
@@ -331,13 +396,12 @@ fluentd-elasticsearch:
         pos_file /var/log/cluster-autoscaler.log.pos
         tag cluster-autoscaler
       </source>
-
       # Logs from systemd-journal for interesting services.
-      # TODO(random-liu): Remove this after cri container runtime rolls out.
       <source>
         @id journald-docker
         @type systemd
         filters [{ "_SYSTEMD_UNIT": "docker.service" }]
+        #pos_file /var/log/journald-docker.pos
         <storage>
           @type local
           persistent true
@@ -345,19 +409,6 @@ fluentd-elasticsearch:
         read_from_head true
         tag docker
       </source>
-
-      # <source>
-      #   @id journald-container-runtime
-      #   @type systemd
-      #   filters [{ "_SYSTEMD_UNIT": "{% raw %}{{ container_runtime }} {% endraw %}.service" }]
-      #   <storage>
-      #     @type local
-      #     persistent true
-      #   </storage>
-      #   read_from_head true
-      #   tag container-runtime
-      # </source>
-
       <source>
         @id journald-kubelet
         @type systemd
@@ -369,7 +420,6 @@ fluentd-elasticsearch:
         read_from_head true
         tag kubelet
       </source>
-
       <source>
         @id journald-node-problem-detector
         @type systemd
@@ -381,24 +431,20 @@ fluentd-elasticsearch:
         read_from_head true
         tag node-problem-detector
       </source>
-
     forward.input.conf: |-
       # Takes the messages sent over TCP
       <source>
         @type forward
       </source>
-
     monitoring.conf: |-
       # Prometheus Exporter Plugin
       # input plugin that exports metrics
       <source>
         @type prometheus
       </source>
-
       <source>
         @type monitor_agent
       </source>
-
       # input plugin that collects metrics from MonitorAgent
       <source>
         @type prometheus_monitor
@@ -406,7 +452,6 @@ fluentd-elasticsearch:
           host ${hostname}
         </labels>
       </source>
-
       # input plugin that collects metrics for output plugin
       <source>
         @type prometheus_output_monitor
@@ -414,7 +459,6 @@ fluentd-elasticsearch:
           host ${hostname}
         </labels>
       </source>
-
       # input plugin that collects metrics for in_tail plugin
       <source>
         @type prometheus_tail_monitor
@@ -422,8 +466,7 @@ fluentd-elasticsearch:
           host ${hostname}
         </labels>
       </source>
-
-    output.conf: |-
+    output.conf: |
       # Enriches records with Kubernetes metadata
       <filter kubernetes.**>
         @type kubernetes_metadata
@@ -451,3 +494,13 @@ fluentd-elasticsearch:
           overflow_action block
         </buffer>
       </match>
+
+  # extraVolumes:
+  #   - name: es-certs
+  #     secret:
+  #       defaultMode: 420
+  #       secretName: es-certs
+  # extraVolumeMounts:
+  #   - name: es-certs
+  #     mountPath: /certs
+  #     readOnly: true
